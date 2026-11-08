@@ -153,11 +153,17 @@ export const KCal = (() => {
   const standardOffset = (t) => legalOffset(t) - (isDST(t) ? 3600 : 0);
 
   /** 한국 벽시계 날짜·시각 → 순간 */
+  /**
+   * 한국 벽시계 날짜·시각 → 순간. 맥(Foundation)·안드로이드(java.time)와 같은 규칙:
+   * - 시계가 건너뛴 시각(서머타임 시작 등): 바뀌기 전 오프셋으로 해석 (= 그만큼 뒤로 밀림)
+   * - 두 번 있었던 시각(서머타임 끝 등): 앞쪽(먼저 온) 순간
+   */
   function instant(y, m, d, h, mi) {
     const wall = Date.UTC(y, m - 1, d, h, mi) / 1000;
-    let t = wall - 9 * 3600;
-    for (let i = 0; i < 3; i++) t = wall - legalOffset(t);
-    return t;
+    const before = legalOffset(wall - 9 * 3600 - 6 * 3600), after = legalOffset(wall - 9 * 3600 + 6 * 3600);
+    const ok = [...new Set([before, after])].map((o) => wall - o).filter((t) => legalOffset(t) === wall - t);
+    if (ok.length) return Math.min(...ok);
+    return wall - before;
   }
   const utcMidnight = (y, m, d) => Date.UTC(y, m - 1, d) / 1000;
   function seoulParts(t) {

@@ -419,7 +419,16 @@ document.addEventListener('keydown', (e) => {
 });
 // 자정을 넘기면 다시 그림
 let lastDN = D.todayDN();
-setInterval(() => { const t = D.todayDN(); if (t !== lastDN) { lastDN = t; if (!S.form) render(); } }, 60000);
+function syncToday() {
+  const t = D.todayDN(); if (t === lastDN) return;
+  const [ly, lm] = D.ymd(lastDN);
+  if (S.month[0] === ly && S.month[1] === lm) S.month = D.ymd(t).slice(0, 2);
+  lastDN = t; if (!S.form) render();
+}
+setInterval(syncToday, 60000);
+// 휴대폰은 백그라운드에서 타이머를 멈추므로, 다시 볼 때 바로 확인
+document.addEventListener('visibilitychange', () => { if (!document.hidden) syncToday(); });
+window.addEventListener('pageshow', syncToday);
 
 // 공유 링크로 열렸을 때
 function checkImport() {
