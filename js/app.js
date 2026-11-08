@@ -1,5 +1,6 @@
 // 음력낙서 화면. 계산은 모두 이 기기 안에서, 기념일은 이 브라우저(localStorage)에만 저장.
 import * as D from './days.js';
+import * as K from './keep.js';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -28,8 +29,35 @@ const S = {
   sheet: null, toast: null,
   conv: { sy: THIS_YEAR, sm: D.ymd(D.todayDN())[1], sd: D.ymd(D.todayDN())[2], ly: THIS_YEAR, lm: 1, ld: 1, ll: false },
   ics: { years: store.get('icsYears', 10), holidays: store.get('icsHol', false) },
+  // 백업 상태: 마지막 백업 시각, 그 뒤로 바뀐 횟수·처음 바뀐 시각, '나중에' 누른 시각
+  meta: Object.assign({ lastBackup: null, dirtyCount: 0, dirtySince: null, snoozeUntil: null }, store.get('meta', {})),
+  persisted: null,
 };
-const saveEvents = () => { if (!qs.get('demo')) store.set('events', S.events); };
+function saveEvents(restored = false) {
+  if (qs.get('demo')) return;
+  store.set('events', S.events);
+  const m = S.meta;
+  if (restored) Object.assign(m, { lastBackup: m.lastBackup || Date.now(), dirtyCount: 0, dirtySince: null });
+  else { m.dirtyCount += 1; m.dirtySince = m.dirtySince || Date.now(); }
+  store.set('meta', m);
+  keepOnDevice();
+}
+async function keepOnDevice() { if (qs.get('demo') || !S.events.length) return; const was = S.persisted; S.persisted = await K.requestPersist(); if (was !== S.persisted && S.section === 'more' && !S.form) render(); }
+/** 바뀐 게 있는데 백업이 없거나 오래됐으면 살짝 권하기: 3번 이상 바꿨거나, 처음 바꾼 지 3일이 지났을 때 */
+function needBackup() {
+  const m = S.meta, now = Date.now();
+  if (qs.get('demo') || !S.events.length || !m.dirtyCount) return false;
+  if (m.snoozeUntil && now < m.snoozeUntil) return false;
+  return m.dirtyCount >= 3 || now - m.dirtySince >= 3 * K.DAY_MS || qs.get('nudge') === '1';
+}
+async function backup() {
+  const text = JSON.stringify({ app: 'lunar-doodle', v: 1, savedAt: new Date().toISOString(), events: S.events, holidays: S.holidays }, null, 1);
+  const r = await K.saveFile(`음력낙서-백업-${D.ymd(D.todayDN()).map((x) => String(x).padStart(2, '0')).join('')}.json`, text, 'application/json', '음력낙서 백업');
+  if (r === 'cancelled') return;
+  Object.assign(S.meta, { lastBackup: Date.now(), dirtyCount: 0, dirtySince: null, snoozeUntil: null });
+  store.set('meta', S.meta); render();
+  toast(r === 'shared' ? '백업 파일을 보냈어요. 카톡 나에게·드라이브 등에 잘 보관하세요' : '백업 파일을 저장했어요 (다운로드 폴더)');
+}
 
 // ───────── 작은 부품
 
@@ -78,6 +106,11 @@ function renderList() {
       <div class="small soft">${gz.hangul}(${gz.hanja})년 · ${gz.animal}띠 해${D.leapMonthOf(l.year) ? ` · 올해는 윤${D.leapMonthOf(l.year)}월이 있어요` : ''}</div></div></div></section>`;
   const soon = list.filter((o) => o.ev && o.dn - from <= 1);
   if (soon.length) html += `<section class="st alert bg-pink pastel"><b class="hand" style="font-size:24px">잊지 마세요!</b><div>${soon.map((o) => `${esc(o.ev.name)} ${o.dn === from ? '오늘' : '내일'}`).join(', ')}</div></section>`;
+  if (needBackup()) {
+    html += `<section class="st nudge bg-mint pastel"><div class="row"><span style="font-size:26px">💾</span><div class="grow"><b class="hand" style="font-size:23px">백업해 둘까요?</b>
+      <div class="small">기념일은 이 폰 브라우저에만 있어요. ${S.meta.lastBackup ? `마지막 백업은 ${K.agoText(S.meta.lastBackup)}이고, 그 뒤로 ${S.meta.dirtyCount}번 바뀌었어요.` : '아직 한 번도 백업하지 않았어요.'} 파일을 카톡 ‘나에게’나 드라이브에 두면 폰을 바꿔도 되살릴 수 있어요.</div></div></div>
+      <div class="row" style="margin-top:8px"><span class="grow"></span><button class="link" data-act="snooze">나중에</button><button class="st btn bg-card" data-act="backup">백업하기</button></div></section>`;
+  }
   if (!S.events.length) {
     html += `<section class="st w3 empty"><div class="hand" style="font-size:26px">아직 등록한 날이 없어요</div>
       <p class="small soft">음력 생신이나 제사처럼 해마다 날짜가 바뀌는 날을 등록하면, 올해는 양력 며칠인지 알아서 계산해 드려요.</p>
@@ -165,7 +198,9 @@ function renderMore() {
     <section class="st w3 form"><div class="hand" style="font-size:26px">🏮 명절 표시</div>
       ${D.HOLIDAYS.map((h) => `<label class="switch"><span class="grow">${h.icon} ${h.name}<span class="tiny soft"> · ${esc(h.note)}</span></span><input type="checkbox" data-hol="${h.id}" ${S.holidays[h.id] ? 'checked' : ''}></label>`).join('')}</section>
     <section class="st form"><div class="hand" style="font-size:26px">💾 백업</div>
-      <p class="small">기념일은 이 브라우저에만 저장돼요. 브라우저 기록을 지우거나 휴대폰을 바꾸기 전에 백업 파일을 저장해 두세요.</p>
+      <p class="small">기념일은 이 브라우저에만 저장돼요. 브라우저 기록을 지우거나 휴대폰을 바꾸기 전에 백업 파일을 저장해 두세요. 휴대폰에서는 공유 창이 열리니 카톡 ‘나에게’나 드라이브에 보내 두면 편해요.</p>
+      <div class="kv small"><span>마지막 백업</span><b>${S.meta.lastBackup ? `${new Date(S.meta.lastBackup).toLocaleDateString('ko-KR')} (${K.agoText(S.meta.lastBackup)})${S.meta.dirtyCount ? ` · 그 뒤 ${S.meta.dirtyCount}번 바뀜` : ' · 최신'}` : '아직 없음'}</b></div>
+      <div class="kv small"><span>이 기기에 오래 보관</span><b>${S.persisted === true ? '켜짐 — 저장 공간이 부족해도 지우지 않아요' : S.persisted === false ? '브라우저가 아직 허락하지 않았어요 (홈 화면에 추가하면 허락되는 경우가 많아요)' : '이 브라우저는 지원하지 않아요'}</b></div>
       <div class="row wrap"><button class="st btn bg-mint" data-act="backup" ${n ? '' : 'disabled'}>백업 파일 저장</button><label class="st btn bg-sky filebtn">백업 불러오기<input type="file" accept=".json,application/json" data-act-file="restore" hidden></label></div>
       ${n ? `<div class="row"><span class="grow"></span><button class="link hl" data-act="wipe">기념일 ${n}개 모두 지우기</button></div>` : ''}</section>
     <p class="small soft">🔒 계산은 모두 이 기기 안에서 하고, 입력한 기념일은 이 브라우저에만 저장돼요. 인터넷이 없어도 열려요.</p></div>`;
@@ -257,7 +292,7 @@ function sharePickSheet(ids) {
 function importSheet(list) {
   const fresh = list.filter((e) => !S.events.some((x) => D.sameEvent(x, e)));
   S.sheet = { title: '💌 받은 기념일', pick: new Set(fresh.map((e) => e.id)), incoming: list, html: '' };
-  S.sheet.render = () => `<p class="small">누군가 기념일 ${list.length}개를 보냈어요. 추가할 것을 골라 주세요.</p>
+  S.sheet.render = () => `<p class="small">${S.sheet.restore ? `백업 파일에 기념일 ${list.length}개가 있어요. 되살릴 것을 골라 주세요.` : `누군가 기념일 ${list.length}개를 보냈어요. 추가할 것을 골라 주세요.`}</p>
     ${list.map((e) => { const dup = !fresh.includes(e); return `<label class="switch"><span class="grow">${kindOf(e).icon} ${esc(e.name)} <span class="tiny soft">${esc(D.sourceText(e))}${e.year ? ' · ' + e.year + '년' : ''}${dup ? ' · 이미 있어요' : ''}</span></span><input type="checkbox" data-pick="${e.id}" ${S.sheet.pick.has(e.id) ? 'checked' : ''} ${dup ? 'disabled' : ''}></label>`; }).join('')}
     <div class="row" style="margin-top:12px"><span class="grow"></span><button class="link" data-act="close-sheet">안 할래요</button><button class="st btn" data-act="import-go" ${S.sheet.pick.size ? '' : 'disabled'}>${S.sheet.pick.size}개 추가</button></div>`;
 }
@@ -294,11 +329,7 @@ function bindSwipe(selr, cb) {
   }, { passive: true });
 }
 
-function download(name, text, type) {
-  const url = URL.createObjectURL(new Blob([text], { type }));
-  const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
-}
+const download = K.download;
 async function shareLink(events) {
   const url = `${location.origin}${location.pathname}#add=${D.encodeShare(events)}`;
   const text = `음력낙서 기념일 ${events.length}개: ${events.map((e) => e.name).join(', ')}`;
@@ -346,12 +377,12 @@ document.addEventListener('click', (e) => {
   else if (act === 'share-go') shareLink(S.events.filter((x) => S.sheet.share.has(x.id)));
   else if (act === 'import-go') {
     const add = S.sheet.incoming.filter((x) => S.sheet.pick.has(x.id)).map((x) => ({ ...x, id: D.newId() }));
-    S.events.push(...add); saveEvents(); S.sheet = null; S.section = 'list'; render(); toast(`${add.length}개 추가했어요`);
+    S.events.push(...add); saveEvents(!!S.sheet.restore); S.sheet = null; S.section = 'list'; render(); toast(`${add.length}개 추가했어요`);
   } else if (act === 'ics') {
     const { text, count } = D.buildICS(S.events, S.holidays, D.todayDN(), S.ics.years, S.ics.holidays);
     download('음력낙서-기념일.ics', text, 'text/calendar;charset=utf-8'); toast(`일정 ${count}개를 담은 파일을 받았어요`);
-  } else if (act === 'backup') {
-    download(`음력낙서-백업-${D.ymd(D.todayDN()).join('')}.json`, JSON.stringify({ app: 'lunar-doodle', v: 1, events: S.events, holidays: S.holidays }, null, 1), 'application/json');
+  } else if (act === 'backup') backup();
+  else if (act === 'snooze') { S.meta.snoozeUntil = Date.now() + 7 * K.DAY_MS; store.set('meta', S.meta); render(); toast('일주일 뒤에 다시 알려 드릴게요');
   } else if (act === 'wipe') {
     if (confirm(`기념일 ${S.events.length}개를 모두 지울까요? 백업 파일이 없으면 되돌릴 수 없어요.`)) { S.events = []; saveEvents(); render(); }
   }
@@ -377,7 +408,7 @@ document.addEventListener('change', (e) => {
       const o = JSON.parse(txt);
       const list = (Array.isArray(o) ? o : o.events || []).map(D.sanitize).filter(Boolean);
       if (!list.length) throw new Error('empty');
-      importSheet(list); render();
+      importSheet(list); S.sheet.restore = true; S.sheet.title = '💾 백업 불러오기'; render();
     }).catch(() => toast('백업 파일을 읽을 수 없어요'));
   }
 });
@@ -401,4 +432,6 @@ window.addEventListener('hashchange', () => { checkImport(); render(); });
 checkImport();
 if (qs.get('form')) S.form = blankForm({ name: '엄마 생신', month: 3, day: 5, year: 1966 });
 render();
+keepOnDevice();
+K.isPersisted().then((p) => { if (S.persisted == null) S.persisted = p; });
 if ('serviceWorker' in navigator && location.protocol !== 'file:' && !qs.get('nosw')) navigator.serviceWorker.register('./sw.js').catch(() => {});

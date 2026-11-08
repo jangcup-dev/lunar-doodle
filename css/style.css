@@ -160,3 +160,8 @@ main { max-width: 620px; margin: 0 auto; padding-top: 12px; padding-left: 16px; 
 .seg { flex-wrap: wrap; }
 .seg button { padding: 0 14px; }
 .form > .seg button { flex: 1 1 40%; }
+.nudge { padding: 14px 16px; }
+.bg-card { background: var(--card); color: var(--ink); }
+.nudge .bg-card { background: #FFFDF8; color: #2D2A26; }
+.kv { display: flex; flex-direction: column; gap: 1px; padding: 8px 12px; border-radius: 10px; background: var(--track); }
+.kv span { font-size: 11px; color: var(--ink-soft); }
