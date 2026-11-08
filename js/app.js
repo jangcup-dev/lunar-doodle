@@ -442,5 +442,5 @@ checkImport();
 if (qs.get('form')) S.form = blankForm({ name: '엄마 생신', month: 3, day: 5, year: 1966 });
 render();
 keepOnDevice();
-K.isPersisted().then((p) => { if (S.persisted == null) S.persisted = p; });
+K.isPersisted().then((p) => { if (S.persisted == null) { S.persisted = p; if (S.section === 'more' && !S.form) render(); } });
 if ('serviceWorker' in navigator && location.protocol !== 'file:' && !qs.get('nosw')) navigator.serviceWorker.register('./sw.js').catch(() => {});

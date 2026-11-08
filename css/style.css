@@ -165,3 +165,4 @@ main { max-width: 620px; margin: 0 auto; padding-top: 12px; padding-left: 16px; 
 .nudge .bg-card { background: #FFFDF8; color: #2D2A26; }
 .kv { display: flex; flex-direction: column; gap: 1px; padding: 8px 12px; border-radius: 10px; background: var(--track); }
 .kv span { font-size: 11px; color: var(--ink-soft); }
+.btn.bg-mint { background: var(--mint); } .btn.bg-pink { background: var(--pink); } .btn.bg-sky { background: var(--sky); } .btn.bg-butter { background: var(--butter); } .btn.bg-lilac { background: var(--lilac); } .btn.bg-card { background: var(--card); color: var(--ink); } .nudge .btn.bg-card { background: #FFFDF8; color: #2D2A26; }
